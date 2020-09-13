@@ -1,0 +1,247 @@
+import socket
+from _thread import *
+import tkinter as tk
+from user import User
+import random
+import pickle
+import sys
+import time
+import pyaudio
+import audioop
+import threading
+
+
+#### tkinter variables
+HEIGHT = 500
+WIDTH = 700
+root = tk.Tk()
+keypress = 0
+textplace = 0
+
+##### font style
+
+# color #
+RED = "#E61919"
+BLUE = "#2F4CEE"
+GREEN = "#1ED146"
+PINK = "#E329F3"
+BLACK = "#000000"
+LYSBLÅ = "#2BCED1"
+COLOR = [RED, BLUE, GREEN, PINK, BLACK, LYSBLÅ]
+# fonts #
+TIMES = "Times"
+HELVETICA = "Helvetica"
+SYMBOL = "Symbol"
+MS = "ms serif"
+FIXEDSYS = "fixedsys"
+SYSTEM = "system"
+FONT = [TIMES, HELVETICA, MS, FIXEDSYS, SYSTEM]
+
+if __name__ == "__main__":
+    login_screen = tk.Toplevel()
+    login_screen.geometry("350x300")
+    login_screen.geometry("+1000+600")
+    all_msg = []
+    all_users = []
+    user = []
+
+    picked_font = random.choice(FONT)
+    picked_color = random.choice(COLOR)
+    class voice:
+        def __init__(self):
+            self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            while 1:
+                try:
+                    self.ip = "192.168.11.53"
+                    self.port = 5051
+                    self.server.connect((self.ip, self.port))
+                    break
+                except Exception as e:
+                    print(e)
+
+            chunk_size = 1024  # 512
+            audio_format = pyaudio.paInt32
+            channels = 1
+            rate = 44000
+
+            self.p = pyaudio.PyAudio()
+            self.playing_stream = self.p.open(format=audio_format, channels=channels, rate=rate, output=True,
+                                              frames_per_buffer=chunk_size)
+            self.recording_stream = self.p.open(format=audio_format, channels=channels, rate=rate, input=True,
+                                             frames_per_buffer=chunk_size)
+
+            threading.Thread(target=self.receive_server_data).start()
+            self.send_data_to_server()
+
+
+
+        def receive_server_data(self):
+            while 1:
+                try:
+                    data = self.server.recv(2048)
+                    self.playing_stream.write(data)
+                except:
+                    pass
+
+        def send_data_to_server(self):
+            while 1:
+                try:
+                    data = self.recording_stream.read(2048)
+                    if audioop.rms(data, 2) > 300:
+                        print(audioop.rms(data, 2))
+                        self.server.sendall(data)
+                except Exception as e:
+                    print(e)
+
+
+
+
+    def quit():
+        login_screen.destroy()
+        root.destroy()
+
+
+    def move_scroll(chatframe):
+        time.sleep(0.2)
+        chatframe.yview_moveto(1)
+
+    def get_users(users):
+        global all_users
+        chanenel_label = tk.Label(mainframe, bg="#ffffe6")
+        chanenel_label.place(relx=0.03, rely=0.10, relwidth=0.2, relheight=0.8)
+        if users != all_users:
+            all_users = users
+        for x in all_users:
+            name = tk.Label(chanenel_label, text=x, font=(TIMES, 14, "bold italic"), bg="#ffffe6")
+            name.pack(anchor="w")
+
+
+    def get_msg(client):
+        try:
+            data = pickle.loads(client.recv(4096))
+            start_new_thread(get_users, (data[-1],))
+            if data[1]:
+                all_msg.append(data[1])
+                name = tk.Label(scrollable_frame, text=f"{data[0]}:", font=(TIMES, 14, "bold italic underline"), bg="#ffffe6", fg=BLUE, wraplength=500)
+                name.pack(anchor="nw")
+                text = tk.Label(scrollable_frame, text=f"{data[1]}", font=(TIMES, 14, "italic"), bg="#ffffe6", fg=data[3], wraplength=400)
+                text.pack(anchor="nw")
+                start_new_thread(move_scroll, (chatframe,))
+
+        except Exception as e:
+            print(e)
+        get_msg(client)
+
+
+    def key():  ## buker enter til keybind for å sende melding
+        global keypress
+        sendMsg(textbox.get())
+
+
+    root.bind("<Return>", lambda x: key())
+
+
+    def update_textbox():  ## sletter innholdet i textbox etter atmelding er sendt
+        textbox.delete(0, "end")
+
+
+    def sendMsg(textbox):  ### sender melding til server
+        client = user[0].conn
+        data = (textbox, picked_font, picked_color, False, None)
+        client.send(pickle.dumps(data))
+        update_textbox()
+
+    def send_voice():
+        while 1:
+            try:
+                client = user[0].conn
+                r = r_stream.read(chunk_size)
+                data = (None, picked_font, picked_color, True, r)
+                client.send(pickle.dumps(data))
+
+            except Exception as e:
+                print(e)
+
+
+
+    def login():
+        name = name_entry.get()
+        password = password_entry.get()
+        SERVER = server_entry.get()
+        PORT = 5050
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        ADDR = (SERVER, PORT)
+        bruker = User(name, client)
+        user.append(bruker)
+        try:
+            client.connect(ADDR)
+            client.send(pickle.dumps((name, password)))
+            data = pickle.loads(client.recv(4096))
+            if data[0] == "connected to server":
+                start_new_thread(get_msg, (client,))
+                root.deiconify()
+                login_screen.withdraw()
+                for x in data[1]:
+                    all_users.append(x)
+                all_users.append(name)
+                threading.Thread(target=voice).start()
+                start_new_thread(get_users, (all_users,))
+
+            else:
+                pass
+        except Exception as e:
+            print(e)
+
+
+    ############ login_screen widget
+    text1_label = tk.Label(login_screen, text="Enter server address")
+    text1_label.place(anchor="s", relx=0.50, rely=0.10, relwidth=0.3, relheight=0.1)
+
+    server_entry = tk.Entry(login_screen)
+    server_entry.place(anchor="s", relx=0.50, rely=0.20, relwidth=0.5, relheight=0.12)
+
+    text2_label = tk.Label(login_screen, text="Enter server password")
+    text2_label.place(anchor="s", relx=0.50, rely=0.30, relwidth=0.4, relheight=0.1)
+
+    password_entry = tk.Entry(login_screen, show='*')
+    password_entry.place(anchor="s", relx=0.50, rely=0.40, relwidth=0.5, relheight=0.12)
+
+    text3_label = tk.Label(login_screen, text="Enter nickname")
+    text3_label.place(anchor="s", relx=0.50, rely=0.50, relwidth=0.4, relheight=0.1)
+
+    name_entry = tk.Entry(login_screen)
+    name_entry.place(anchor="s", relx=0.50, rely=0.60, relwidth=0.5, relheight=0.12)
+
+    login_button = tk.Button(login_screen, text="Login", command=lambda: login())
+    login_button.place(anchor="w", relx=0.05, rely=0.80, relwidth=0.45, relheight=0.2)
+
+    quit_button = tk.Button(login_screen, text="Quit", command=quit)
+    quit_button.place(anchor="w", relx=0.50, rely=0.80, relwidth=0.45, relheight=0.2)
+
+    ########## main program widget
+    canvas = tk.Canvas(root, height=HEIGHT, width=WIDTH)
+    canvas.pack()
+
+    mainframe = tk.Frame(root, bg="#6666ff")
+    mainframe.place(relx=0, rely=0, relwidth=1, relheight=1)
+
+    chatframe = tk.Canvas(mainframe, bg="#ffffe6", scrollregion=(0, 0, 500, 500))
+    chatframe.place(relx=0.25, rely=0.10, relwidth=0.7, relheight=0.8)
+
+    scrollbar = tk.Scrollbar(mainframe, orient="vertical", command=chatframe.yview)
+    scrollable_frame = tk.Frame(chatframe, bg="#ffffe6")
+    scrollable_frame.bind("<Configure>", lambda e: chatframe.configure(scrollregion=chatframe.bbox("all")))
+    chatframe.create_window((0, 0), window=scrollable_frame, anchor="nw")
+    chatframe.configure(yscrollcommand=scrollbar.set)
+    scrollbar.pack(side="right", fill="y")
+    for x in range(18):
+        emtytext = tk.Label(scrollable_frame, text="", bg="#ffffe6", fg="#ffffe6")
+        emtytext.pack(anchor="nw")
+
+    textbox = tk.Entry(mainframe, bg="#ffffe6", font="50")
+    textbox.insert(0, " ")
+    textbox.place(relx=0.25, rely=0.91, relwidth=0.7, relheight=0.08)
+
+root.withdraw()
+root.mainloop()
+sys.exit()
